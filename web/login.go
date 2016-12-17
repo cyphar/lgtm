@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"regexp"
 	"time"
 
 	"github.com/go-gitea/lgtm/model"
@@ -12,7 +13,24 @@ import (
 
 	log "github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/gin"
+	"github.com/ianschenck/envflag"
 )
+
+var (
+	whitelist      = envflag.String("USER_WHITELIST", "", "")
+	forceWhitelist = envflag.Bool("USER_WHITELIST_FORCE", false, "")
+
+	userWhitelistRegexp *regexp.Regexp
+)
+
+func init() {
+	envflag.Parse()
+
+	if *whitelist == "" {
+		*whitelist = ".*"
+	}
+	userWhitelistRegexp = regexp.MustCompile(*whitelist)
+}
 
 // Login attempts to authorize a user via GitHub oauth2. If the user does not
 // yet exist, and new account is created. Upon successful login the user is
@@ -45,7 +63,6 @@ func Login(c *gin.Context) {
 	// get the user from the database
 	u, err := store.GetUserLogin(c, tmpuser.Login)
 	if err != nil {
-
 		// create the user account
 		u = &model.User{}
 		u.Login = tmpuser.Login
@@ -53,12 +70,26 @@ func Login(c *gin.Context) {
 		u.Avatar = tmpuser.Avatar
 		u.Secret = model.Rand()
 
+		// If someone has set a whitelist, we need to obey it.
+		if !userWhitelistRegexp.MatchString(u.Login) {
+			log.Errorf("user not in whitelist tried to register: %s", u.Login)
+			c.Redirect(303, "/login?error=not_in_whitelist")
+			return
+		}
+
 		// insert the user into the database
 		if err := store.CreateUser(c, u); err != nil {
 			log.Errorf("cannot insert %s. %s", u.Login, err)
 			c.Redirect(303, "/login?error=internal_error")
 			return
 		}
+	}
+
+	// If someone has set a whitelist, we need to obey it.
+	if *forceWhitelist && !userWhitelistRegexp.MatchString(u.Login) {
+		log.Errorf("user not in whitelist tried to log in: %s", u.Login)
+		c.Redirect(303, "/login?error=not_in_whitelist")
+		return
 	}
 
 	// update the user meta data and authorization
@@ -97,6 +128,12 @@ func LoginToken(c *gin.Context) {
 	user, err := store.GetUserLogin(c, login)
 	if err != nil {
 		c.String(404, "Unable to authenticate user %s. Not registered.", user.Login)
+		return
+	}
+	// If someone has set a whitelist, we need to obey it.
+	if *forceWhitelist && !userWhitelistRegexp.MatchString(user.Login) {
+		log.Errorf("user not in whitelist tried to log in: %s", user.Login)
+		c.Redirect(303, "/login?error=not_in_whitelist")
 		return
 	}
 	exp := time.Now().Add(time.Hour * 72).Unix()
