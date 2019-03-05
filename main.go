@@ -9,6 +9,7 @@ import (
 
 	"github.com/Sirupsen/logrus"
 	"github.com/gin-gonic/contrib/ginrus"
+	"github.com/gin-gonic/gin"
 	"github.com/ianschenck/envflag"
 	_ "github.com/joho/godotenv/autoload"
 )
@@ -20,11 +21,16 @@ var (
 	debug = envflag.Bool("DEBUG", false, "")
 )
 
+func init() {
+	gin.SetMode(gin.ReleaseMode)
+}
+
 func main() {
 	envflag.Parse()
 
 	if *debug {
 		logrus.SetLevel(logrus.DebugLevel)
+		gin.SetMode(gin.DebugMode)
 	} else {
 		logrus.SetLevel(logrus.WarnLevel)
 	}
